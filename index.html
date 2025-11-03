@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Project Scheduler</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+h1 { text-align: center; }
+table { border-collapse: collapse; margin: 10px auto; }
+th, td { border: 1px solid #333; padding: 5px 8px; text-align: center; }
+input[type="number"] { width: 60px; text-align: center; }
+input[type="date"] { padding:4px; }
+canvas { border:1px solid #333; display:block; margin: 20px auto; }
+#controls { text-align:center; margin-bottom: 15px; }
+.note { font-size: 12px; color: #555; text-align:center; margin-top:6px; }
+#implementationDiv, #progressDiv { text-align:center; overflow-x:auto; margin-top:12px; }
+</style>
+</head>
+<body>
+<h1>Project Scheduler</h1>
+
+<div id="controls">
+  <label>Number of Activities: </label>
+  <input type="number" id="numActivities" value="5" min="1" max="30">
+  <button onclick="generateTable()">Generate Table</button>
+  <br/><br/>
+  <!-- New inputs -->
+  <label>Project Start Date: </label>
+  <input type="date" id="projStartDate" placeholder="MM/DD/YYYY">
+  &nbsp;&nbsp;
+  <label>Project Evaluation Date: </label>
+  <input type="date" id="projEvalDate" placeholder="MM/DD/YYYY">
+  <div class="note">
+    The two date inputs are optional. If only Project Start Date is filled, Implementation Schedule will be produced. If both are filled, both additional reports appear. If only Evaluation Date is filled, it is ignored.
+  </div>
+</div>
+
+<div id="inputTableDiv" style="text-align:center;"></div>
+<div style="text-align:center; margin-top:10px;">
+  <button onclick="runSchedule()">Run Schedule</button>
+</div>
+
+<h2 style="text-align:center" id="projectInfo"></h2>
+<div id="scheduleDiv" style="text-align:center; overflow-x:auto;"></div>
+
+<!-- New report containers -->
+<div id="implementationDiv"></div>
+<div id="progressDiv"></div>
+
+<canvas id="diagramCanvas" width="1200" height="600"></canvas>
+<canvas id="ganttCanvas" width="1200" height="400"></canvas>
+
+<script>
+let activities=[];
+
+function generateTable(){
+  const n=Number(document.getElementById('numActivities').value);
+  let html='<table><tr><th>Activity ID</th><th>Predecessor (comma separated, X if none)</th><th>Duration (days)</th></tr>';
+  for(let i=1;i<=n;i++){
+    html+=`<tr>
+      <td><input type="text" id="aid${i}" value="A${i}"></td>
+      <td><input type="text" id="pred${i}" value="X"></td>
+      <td><input type="number" id="dur${i}" value="1" min="1"></td>
+    </tr>`;
+  }
+  html+='</table>';
+  document.getElementById('inputTableDiv').innerHTML=html;
+}
+
+function runSchedule(){
+  const n=Number(document.getElementById('numActivities').value);
+  activities=[];
+  for(let i=1;i<=n;i++){
+    let predRaw = document.getElementById(`pred${i}`).value.trim();
+    let preds = predRaw === "" ? ["X"] : predRaw.split(',').map(p=>p.trim()).filter(p=>p!=="");
+    if(preds.length===0) preds=["X"];
+    activities.push({
+      id: document.getElementById(`aid${i}`).value.trim() || `A${i}`,
+      pred: preds,
+      dur: Math.max(1, Number(document.getElementById(`dur${i}`).value) || 1)
+    });
+  }
+
+  // read optional dates
+  const startInput = document.getElementById('projStartDate').value;
+  const evalInput  = document.getElementById('projEvalDate').value;
+  const projStart = startInput ? new Date(startInput) : null;
+  const projEval  = evalInput ? new Date(evalInput) : null;
+
+  // If evaluation provided without start, ignore evaluation (per requirements)
+  const useImplementation = !!projStart;
+  const useEvaluation = !!projStart && !!projEval;
+
+  computeSchedule(projStart, projEval, useImplementation, useEvaluation);
+}
+
+function computeSchedule(projStartRaw, projEvalRaw, useImplementation, useEvaluation){
+  // --- existing compute ES/EF/LS/LF/Slack logic (same as original) ---
+  // Initialize ES, EF, LS, LF, Slack
+  let ES={}, EF={}, LS={}, LF={}, Slack={};
+  let remaining = [...activities];
+  // ensure predecessor references align: if predecessor value not found treat as X (no pred)
+  // But we'll keep original logic: 'X' indicates none.
+  while(remaining.length>0){
+    let progressed=false;
+    for(let i=remaining.length-1;i>=0;i--){
+      let a=remaining[i];
+      if(a.pred.length===1 && a.pred[0].toUpperCase()==='X'){
+        ES[a.id]=0;
+        EF[a.id]=0 + a.dur;
+        remaining.splice(i,1);
+        progressed=true;
+      } else if(a.pred.every(p=>EF[p]!==undefined)){
+        const maxEF = Math.max(...a.pred.map(p=>EF[p]));
+        ES[a.id]=maxEF;
+        EF[a.id]=maxEF + a.dur;
+        remaining.splice(i,1);
+        progressed=true;
+      }
+    }
+    if(!progressed){
+      // cyclic or unknown preds: break to avoid infinite loop
+      console.warn("Cycle or missing predecessor references detected. Stopping forward pass.");
+      break;
+    }
+  }
+
+  // Compute LS, LF backward
+  const projDur = Object.values(EF).length ? Math.max(...Object.values(EF)) : 0;
+  let remainingBack = [...activities];
+  while(remainingBack.length>0){
+    let progressed=false;
+    for(let i=remainingBack.length-1;i>=0;i--){
+      let a=remainingBack[i];
+      const succs = activities.filter(act=>act.pred.includes(a.id));
+      if(succs.length===0 || succs.every(s=>LS[s.id]!==undefined)){
+        const minLS = (succs.length===0) ? projDur : Math.min(...succs.map(s=>LS[s.id]));
+        LF[a.id]=minLS;
+        LS[a.id]=minLS - a.dur;
+        Slack[a.id]=LS[a.id] - (ES[a.id] !== undefined ? ES[a.id] : 0);
+        remainingBack.splice(i,1);
+        progressed=true;
+      }
+    }
+    if(!progressed){
+      console.warn("Cycle or missing successor references detected. Stopping backward pass.");
+      break;
+    }
+  }
+
+  // Display project duration & critical activities
+  const critical = activities.filter(a=>Slack[a.id]===0).map(a=>a.id);
+  document.getElementById('projectInfo').innerHTML=`Project Duration: ${projDur} day(s) | Critical Activities: ${critical.join(', ')}`;
+
+  // Display schedule table (original)
+  let html='<table><tr><th>Activity</th><th>Predecessor</th><th>Duration</th><th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>Slack</th></tr>';
+  activities.forEach(a=>{
+    html+=`<tr${Slack[a.id]===0?' style="background-color:#ffcccc"':''}>
+      <td>${a.id}</td>
+      <td>${a.pred.join(',')}</td>
+      <td>${a.dur}</td>
+      <td>${ES[a.id]!==undefined?ES[a.id]:"-"}</td>
+      <td>${EF[a.id]!==undefined?EF[a.id]:"-"}</td>
+      <td>${LS[a.id]!==undefined?LS[a.id]:"-"}</td>
+      <td>${LF[a.id]!==undefined?LF[a.id]:"-"}</td>
+      <td>${Slack[a.id]!==undefined?Slack[a.id]:"-"}</td>
+    </tr>`;
+  });
+  html+='</table>';
+  document.getElementById('scheduleDiv').innerHTML=html;
+
+  // Draw diagrams (same as original)
+  drawDiagram(activities, ES, EF, Slack);
+  drawGantt(activities, ES, EF, Slack);
+
+  // If user provided Project Start Date -> Implementation Schedule
+  if(useImplementation){
+    // prepare mapping from ES/EF/LF to dates skipping weekends
+    const projStart = normalizeToWorkingDay(projStartRaw);
+    // create implementation table
+    let imp = '<h3>Implementation Schedule</h3>';
+    imp += '<table><tr><th>Activity ID</th><th>Predecessor</th><th>Start Date</th><th>Finish Date</th><th>Slack Date (LF)</th></tr>';
+    activities.forEach(a=>{
+      // only include if ES/EF/LF exist; if missing, put '-'
+      if(ES[a.id]===undefined || EF[a.id]===undefined || LF[a.id]===undefined){
+        imp += `<tr>
+          <td>${a.id}</td><td>${a.pred.join(',')}</td><td>-</td><td>-</td><td>-</td>
+        </tr>`;
+      } else {
+        const startDate = addWorkDays(projStart, ES[a.id]);
+        const finishDate = addWorkDays(projStart, EF[a.id]-1);
+        const slackDate = addWorkDays(projStart, LF[a.id]-1);
+        imp += `<tr${Slack[a.id]===0?' style="background-color:#ffcccc"':''}>
+          <td>${a.id}</td>
+          <td>${a.pred.join(',')}</td>
+          <td>${formatDate(startDate)}</td>
+          <td>${formatDate(finishDate)}</td>
+          <td>${formatDate(slackDate)}</td>
+        </tr>`;
+      }
+    });
+    imp += '</table>';
+    document.getElementById('implementationDiv').innerHTML = imp;
+  } else {
+    document.getElementById('implementationDiv').innerHTML = '';
+  }
+
+  // If user provided both Project Start Date and Evaluation Date -> Progress Evaluation
+  if(useEvaluation){
+    const projStart = normalizeToWorkingDay(projStartRaw);
+    const evalDate = normalizeToWorkingDay(projEvalRaw);
+    // Map each activity's start calendar date & finish calendar date
+    let actDates = {};
+    activities.forEach(a=>{
+      if(ES[a.id]!==undefined && EF[a.id]!==undefined){
+        const s = addWorkDays(projStart, ES[a.id]);
+        const f = addWorkDays(projStart, EF[a.id]-1);
+        actDates[a.id] = {start: s, finish: f};
+      } else {
+        actDates[a.id] = {start: null, finish: null};
+      }
+    });
+
+    // compute working-day elapsed per activity (inclusive of start)
+    const totalDur = activities.reduce((sum,a)=>sum + (a.dur||0), 0) || 1;
+    let progHtml = '<h3>Progress Evaluation</h3>';
+    progHtml += '<table><tr><th>Activity ID</th><th>Predecessor</th><th>Activity progress %</th><th>Project progress %</th></tr>';
+    let totalProjectProgress = 0;
+    activities.forEach(a=>{
+      const dates = actDates[a.id];
+      let activityProgressPct = 0;
+      let projectContributionPct = 0;
+      if(dates.start && evalDate >= dates.start){
+        // elapsed days from start to evaluation (count working days, inclusive of start)
+        const elapsed = workingDaysBetweenInclusive(dates.start, evalDate);
+        const effectiveElapsed = Math.min(elapsed, a.dur);
+        activityProgressPct = (effectiveElapsed / a.dur) * 100;
+        projectContributionPct = (effectiveElapsed / totalDur) * 100; // equals (elapsed/dur)*(dur/totalDur)*100
+      } else {
+        activityProgressPct = 0;
+        projectContributionPct = 0;
+      }
+      // cap activity to 100
+      if(activityProgressPct > 100) activityProgressPct = 100;
+      // if activity finished earlier than eval date, ensure projectContributionPct uses full duration
+      if(dates.finish && evalDate >= dates.finish){
+        projectContributionPct = (a.dur / totalDur) * 100;
+        activityProgressPct = 100;
+      }
+      totalProjectProgress += projectContributionPct;
+      progHtml += `<tr>
+        <td>${a.id}</td>
+        <td>${a.pred.join(',')}</td>
+        <td>${roundNum(activityProgressPct,2)}%</td>
+        <td>${roundNum(projectContributionPct,2)}%</td>
+      </tr>`;
+    });
+    progHtml += `<tr style="font-weight:bold; background:#eef;"><td colspan="3">Total Project Progress</td><td>${roundNum(totalProjectProgress,2)}%</td></tr>`;
+    progHtml += '</table>';
+    document.getElementById('progressDiv').innerHTML = progHtml;
+  } else {
+    document.getElementById('progressDiv').innerHTML = '';
+  }
+
+  // helper rounding
+  function roundNum(v,dec){ return Math.round(v * Math.pow(10,dec)) / Math.pow(10,dec); }
+}
+
+/* ------------------ Drawing functions (original, slightly adapted) ------------------ */
+
+function drawDiagram(acts, ES, EF, Slack){
+  const canvas=document.getElementById('diagramCanvas');
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.font='10px Arial';
+  const radius=15;
+  const xSpacing=120, ySpacing=60;
+  let pos={};
+  // Topological placement
+  let layers=[];
+  let placed={};
+  while(Object.keys(placed).length<acts.length){
+    let layer=[];
+    acts.forEach(a=>{
+      if(!placed[a.id]){
+        if(a.pred.length===1 && a.pred[0].toUpperCase()==='X') layer.push(a);
+        else if(a.pred.every(p=>placed[p])) layer.push(a);
+      }
+    });
+    if(layer.length===0) {
+      // cycle - place remaining arbitrarily
+      acts.forEach(a=>{ if(!placed[a.id]) layer.push(a); });
+      layers.push(layer);
+      layer.forEach(a=>placed[a.id]=true);
+      break;
+    }
+    layers.push(layer);
+    layer.forEach(a=>placed[a.id]=true);
+  }
+
+  // Draw nodes layer by layer
+  layers.forEach((layer,li)=>{
+    layer.forEach((a,ai)=>{
+      const x=80+li*xSpacing;
+      const y=50+ai*ySpacing + Math.max(0, (layers.length-li-1)*10);
+      pos[a.id]={x,y};
+      ctx.beginPath();
+      ctx.ellipse(x, y, radius+10, radius+6, 0, 0, 2*Math.PI);
+      ctx.fillStyle=Slack[a.id]===0?'#ff6666':'#66ccff';
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle='black';
+      ctx.fillText(`${a.id} (${a.dur})`,x-18,y+4);
+    });
+  });
+
+  // Draw arrows
+  ctx.strokeStyle='black';
+  ctx.fillStyle='black';
+  acts.forEach(a=>{
+    if(!(a.pred.length===1 && a.pred[0].toUpperCase()==='X')){
+      a.pred.forEach(p=>{
+        if(pos[p] && pos[a.id]) {
+          const start=pos[p];
+          const end=pos[a.id];
+          ctx.beginPath();
+          ctx.moveTo(start.x+25,start.y);
+          ctx.lineTo(end.x-25,end.y);
+          ctx.stroke();
+          // arrowhead
+          let angle=Math.atan2(end.y-start.y,end.x-start.x);
+          ctx.beginPath();
+          ctx.moveTo(end.x-25,end.y);
+          ctx.lineTo(end.x-25-8*Math.cos(angle-Math.PI/6), end.y-8*Math.sin(angle-Math.PI/6));
+          ctx.lineTo(end.x-25-8*Math.cos(angle+Math.PI/6), end.y-8*Math.sin(angle+Math.PI/6));
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+    }
+  });
+}
+
+function drawGantt(acts, ES, EF, Slack){
+  const canvas=document.getElementById('ganttCanvas');
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.font='10px Arial';
+  const leftMargin=80;
+  const topMargin=40;
+  const rowHeight=22;
+  // get project end
+  const projectEnd = Math.max(...acts.map(a=>EF[a.id] || 0));
+  const timeScale = Math.max(6, Math.floor((canvas.width - leftMargin - 40) / Math.max(6, projectEnd))); // px per day
+  // Draw time axis
+  for(let t=0;t<=projectEnd;t++){
+    const x=leftMargin+t*timeScale;
+    ctx.fillStyle='black';
+    ctx.fillText(t,x-3,topMargin + acts.length*rowHeight + 14);
+    ctx.beginPath();
+    ctx.moveTo(x,topMargin);
+    ctx.lineTo(x,topMargin+acts.length*rowHeight);
+    ctx.strokeStyle='#eee';
+    ctx.stroke();
+  }
+
+  // Draw activity bars (bottom to top)
+  acts.slice().reverse().forEach((a,idx)=>{
+    const y=topMargin + idx*rowHeight;
+    const xStart = leftMargin + (ES[a.id] !== undefined ? ES[a.id]*timeScale : 0);
+    const width = ( (EF[a.id] !== undefined ? (EF[a.id]-ES[a.id]) : 0) ) * timeScale;
+    ctx.fillStyle = Slack[a.id]===0 ? '#ff6666' : '#6699ff';
+    ctx.fillRect(xStart, y, width, rowHeight-6);
+    ctx.strokeStyle='black';
+    ctx.strokeRect(xStart, y, width, rowHeight-6);
+    ctx.fillStyle='black';
+    ctx.fillText(`${a.id} (${a.dur})`, xStart+4, y + rowHeight - 10);
+  });
+}
+
+/* ------------------ Date / working-day helper functions ------------------ */
+
+// normalize date (strip time)
+function toDateOnly(d){
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+// is weekend
+function isWeekend(date){
+  const d = date.getDay();
+  return d === 0 || d === 6; // Sunday (0) or Saturday (6)
+}
+
+// if date is weekend, move to next Monday
+function normalizeToWorkingDay(d){
+  if(!d) return null;
+  let dd = toDateOnly(d);
+  while(isWeekend(dd)){
+    dd.setDate(dd.getDate() + 1);
+  }
+  return dd;
+}
+
+// add n working days to a start date and return a new Date
+// addWorkDays(start, 0) -> start (if start is working day)
+// addWorkDays(start, 1) -> next working day after start
+function addWorkDays(start, n){
+  if(!start) return null;
+  let d = new Date(start.getTime());
+  d = toDateOnly(d);
+  let added = 0;
+  if(n === 0) {
+    // If start on weekend, normalize to next working day
+    while(isWeekend(d)) d.setDate(d.getDate()+1);
+    return d;
+  }
+  while(added < n){
+    d.setDate(d.getDate() + 1);
+    if(!isWeekend(d)) added++;
+  }
+  // if result is weekend (shouldn't be), move forward
+  while(isWeekend(d)) d.setDate(d.getDate()+1);
+  return d;
+}
+
+// count working days inclusive between start and end (if end < start => 0)
+function workingDaysBetweenInclusive(start, end){
+  if(!start || !end) return 0;
+  let s = toDateOnly(start);
+  let e = toDateOnly(end);
+  if(e < s) return 0;
+  let count = 0;
+  let cur = new Date(s.getTime());
+  while(cur <= e){
+    if(!isWeekend(cur)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+function formatDate(d){
+  if(!d) return '-';
+  const opts = { year: 'numeric', month: 'long', day: 'numeric' };
+  return d.toLocaleDateString(undefined, opts);
+}
+</script>
+</body>
+</html>
