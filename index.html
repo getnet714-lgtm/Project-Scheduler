@@ -39,6 +39,91 @@ canvas { border:1px solid #333; display:block; margin: 20px auto; }
 </div>
 
 <h1>Project Scheduler</h1>
+<!-- ===== HEADER TITLE ===== -->
+<h1 style="text-align:center; margin-top: 20px;">Project Scheduler</h1>
+
+<!-- ===== RED AMHARIC HEADER (two lines below) ===== -->
+<h2 style="text-align:center; color:red; font-weight:bold; margin-top: 30px;">
+    የአጠቃቀም መመሪያ
+</h2>
+
+<!-- ===== SCROLLABLE INSTRUCTION BOX ===== -->
+<div style="
+    width: 85%;
+    max-width: 900px;
+    height: 350px;
+    overflow-y: scroll;
+    margin: 20px auto;
+    padding: 20px;
+    border: 2px solid #ccc;
+    border-radius: 10px;
+    background: #fafafa;
+    font-size: 16px;
+    line-height: 1.6;
+">
+
+    <p>
+        በዚህ መተግበሪያ ውስጥ ፕሮጀክትዎን በተስተካከለ መንገድ ለመቆጣጠር እና የጊዜ ሰሌዳ 
+        ለመፍጠር ተግባራትን (Activities) በቅደም ተከተል ማስገባት ይኖርብዎታል። 
+        በቀጣይ ዋና መመሪያዎች እነሆ፦
+    </p>
+
+    <h3>1. የተግባራት ብዛት ማስገባት</h3>
+    <p>
+        በ “Number of Activities” ቦታ ስንት ተግባራት (ተግባር / Activity) እንደሚፈልጉ 
+        ያስገቡ።
+    </p>
+
+    <h3>2. የተግባር ኮዶች መስጠት (A1, A2, A3 …)</h3>
+    <p>
+        እያንዳንዱ ተግባር በተከታታይ መለያ ይይዛል፤ ለምሳሌ A1, A2, A3 …
+    </p>
+
+    <h3>3. ቀዳሚ ተግባራት (Predecessors) መስጠት</h3>
+    <p>
+        ቀዳሚ ተግባር ማለት አንድ ተግባር ከጀመረ በፊት ሊጠናቀቅ የሚገባው ተግባር ነው።<br>
+        - ቀዳሚ የሌለው ተግባር "X" ይሙሉ። <br>
+        - ቀዳሚ ሊሆነው የሚችለው ፊተኛ ተግባር ብቻ ነው (A3 ለማስጀመር A2 ብቻ ይችላል)።
+    </p>
+
+    <h3>4. ከሁለት በላይ ቀዳሚዎች ማስገባት</h3>
+    <p>
+        ብዙ ቀዳሚዎች ካሉ፣ በኮማ "," ይለያዩ።<br>
+        ለምሳሌ፦ A5 = A2, A3, A4
+    </p>
+
+    <h3>5. ቆይታ (Duration) መስጠት</h3>
+    <p>
+        የተግባር ቆይታ በቀናት እና በአካል ቁጥር (integer) መለኪያ ይጻፋል።
+    </p>
+
+    <h3>6. የፕሮጀክት መጀመሪያ ቀን (Project Start Date)</h3>
+    <p>
+        ፕሮጀክት የሚጀምርበትን ቀን ይምረጡ። ይህ ሁሉንም ተግባራት የጊዜ መስርያ ማዕከል ይሆናል።
+    </p>
+
+    <h3>7. የፕሮጀክት ግምገማ ቀን (Evaluation Date)</h3>
+    <p>
+        እስከ የተመረጠው ቀን ድረስ ፕሮጀክቱ ያለውን ሂደት ለመገምገም ይጠቅማል።
+    </p>
+
+    <h3>8. “Run Schedule” መጠቀም</h3>
+    <p>
+        ሁሉን መረጃ ካስገቡ በኋላ “Run Schedule” ይጫኑ። ፕሮግራሙ ቅደም ተከተል፣ 
+        ክሪቲካል ፓት፣ ጊዜ ሰንጠረዥ እና ቻርቶች ይዘጋጃል።
+    </p>
+
+    <h3>9. የፕሮጀክት ውጤቶች (Outputs)</h3>
+    <p>
+        - ጠቅላላ የፕሮጀክት ቆይታ<br>
+        - ክሪቲካል ፓት (Critical Path)<br>
+        - ES, EF, LS, LF, Slack ጊዜ ሰንጠረዥ<br>
+        - የፕሮጀክት ግብረ-መስራት ቻርት (Gantt Chart)<br>
+        - Network Diagram<br>
+        - Progress Analysis
+    </p>
+
+</div>
 
 <div id="controls">
   <label>Number of Activities: </label>
@@ -467,6 +552,7 @@ function formatDate(d){
 </script>
 </body>
 </html>
+
 
 
 
